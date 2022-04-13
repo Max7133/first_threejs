@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Maksim Pasnitsenko's first three.js app</title>
+    <style>
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <script
+      async
+      src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"
+    ></script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.139.2/build/three.module.js"
+        }
+      }
+    </script>
+    <script type="module">
+      import * as THREE from "three";
+      import { VRButton } from "https://unpkg.com/three/examples/jsm/webxr/VRButton.js";
+      import { OrbitControls } from "https://unpkg.com/three/examples/jsm/controls/OrbitControls.js";
+      import { GLTFLoader } from "https://unpkg.com/three/examples/jsm/loaders/GLTFLoader.js";
+      import { KTX2Loader } from "https://unpkg.com/three/examples/jsm/loaders/KTX2Loader.js";
+      import { MeshoptDecoder } from "https://unpkg.com/three/examples/jsm/libs/meshopt_decoder.module.js";
+      import { XRControllerModelFactory } from "https://unpkg.com/three/examples/jsm/webxr/XRControllerModelFactory.js";
+
+      let controller1, controller2;
+      let controllerGrip1, controllerGrip2;
+      let raycaster;
+
+      const intersected = [];
+      const tempMatrix = new THREE.Matrix4();
+      const raycastGroup = new THREE.Group();
+      const scene = new THREE.Scene();
+
+      // Cube Image Background
+      const reflectionCube = new THREE.CubeTextureLoader()
+        .setPath("textures/")
+        .load(["px.png", "nx.png", "py.png", "ny.png", "pz.png", "nz.png"]);
+
+      scene.background = reflectionCube;
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      );
+
+      // Renderer
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.shadowMapEnabled = true;
+      renderer.shadowMapType = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement); // Check later
+      renderer.setSize(window.innerWidth, window.innerHeight);
+
+      const axesHelper = new THREE.AxesHelper(5);
+      scene.add(axesHelper);
+
+      // Geometries
+      const geometries = [
+        new THREE.BoxGeometry(0.2, 0.2, 0.2),
+        new THREE.ConeGeometry(0.2, 0.2, 64),
+        new THREE.CylinderGeometry(0.2, 0.2, 0.2, 64),
+        new THREE.IcosahedronGeometry(0.2, 8),
+        new THREE.TorusGeometry(0.2, 0.04, 64, 32),
+      ];
+
+      // Orbit Control
+      let controls = new OrbitControls(camera, renderer.domElement);
+      controls.listenToKeyEvents(window); // optional
+      //controls.addEventListener( 'change', render ); // call this only in static scenes (i.e., if there is no animation loop)
+      controls.enableDamping = true; // an animation loop is required when either damping or auto-rotation are enabled
+      controls.dampingFactor = 0.05;
+      controls.screenSpacePanning = false;
+      controls.minDistance = 1;
+      controls.maxDistance = 10;
+      controls.maxPolarAngle = Math.PI;
+
+      // Direction Light
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+      directionalLight.position.set(0, 15, 15);
+      directionalLight.castShadow = true;
+      directionalLight.shadow.camera.top = 4;
+      directionalLight.shadow.camera.bottom = -4;
+      directionalLight.shadow.camera.right = 4;
+      directionalLight.shadow.camera.left = -4;
+      directionalLight.shadow.mapSize.set(4096, 4096);
+      scene.add(directionalLight);
+
+      scene.add(new THREE.HemisphereLight(0x808080, 0x606060));
+
+      //  Camera Helper Shows The Alignment Using Lines
+      const helper = new THREE.CameraHelper(directionalLight.shadow.camera);
+      scene.add(helper);
+
+      // Load Texture
+      const earth_atmos_2048 = new THREE.TextureLoader().load(
+        "textures/earth_atmos_2048.jpeg"
+      );
+      const earth_normal_2048 = new THREE.TextureLoader().load(
+        "textures/earth_normal_2048.jpeg"
+      );
+      const earthcloudmaptrans = new THREE.TextureLoader().load(
+        "textures/earthcloudmaptrans.jpeg"
+      );
+      const earth_specular_2048 = new THREE.TextureLoader().load(
+        "textures/earth_specular_2048.jpeg"
+      );
+      const earth_lights_2048 = new THREE.TextureLoader().load(
+        "textures/earth_lights_2048.PNG"
+      );
+
+      const earth_clouds_2048 = new THREE.TextureLoader().load(
+        "textures/earth_clouds_2048.PNG"
+      );
+
+      // Earth Model
+      const geometry = new THREE.SphereGeometry(2, 36, 36);
+      const material = new THREE.MeshPhongMaterial({
+        map: earth_atmos_2048,
+        normalMap: earth_normal_2048,
+        wireframe: false,
+        specularMap: earth_specular_2048,
+        shininess: 40,
+        side: THREE.DoubleSide,
+        envMap: reflectionCube,
+      });
+
+      //geometry.position.y = 20;
+
+      const geometry2 = new THREE.SphereGeometry(2.01, 36, 36);
+      const cloudmaterial2 = new THREE.MeshLambertMaterial({
+        map: earthcloudmaptrans,
+        alphaMap: earth_clouds_2048,
+        transparent: true,
+      });
+
+      const cube = new THREE.Mesh(geometry, material);
+      cube.position.set(2, 4, 1);
+      cube.material.side = THREE.DoubleSide;
+      cube.castShadow = true;
+      cube.receiveShadow = true;
+      raycastGroup.add(cube);
+
+      const cube_2 = new THREE.Mesh(geometry2, cloudmaterial2);
+      cube_2.position.set(2, 4, 1);
+      cube_2.material.side = THREE.DoubleSide;
+      cube_2.outputEncoding = THREE.sRGBEncoding;
+      cube.castShadow = true;
+      cube.receiveShadow = true;
+      raycastGroup.add(cube_2);
+
+      // Loads The Horse Model
+      const ktx2Loader = new KTX2Loader()
+        .setTranscoderPath("js/libs/basis/")
+        .detectSupport(renderer);
+
+      // Model
+      const loader = new GLTFLoader().setPath("models/");
+      loader.setKTX2Loader(ktx2Loader);
+      loader.setMeshoptDecoder(MeshoptDecoder);
+      loader.load("b_horse.glb", function (gltf) {
+        // coffeemat.glb was produced from the source scene using gltfpack:
+        // gltfpack -i coffeemat/scene.gltf -o coffeemat.glb -cc -tc
+        // The resulting model uses EXT_meshopt_compression (for geometry) and KHR_texture_basisu (for texture compression using ETC1S/BasisLZ)
+        gltf.scene.position.y = 0.35; // 2.5 for sphere with horse
+        gltf.scene.scale.set(0.001, 0.001, 0.001);
+        gltf.scene.traverse(function (node) {
+          if (node.material) {
+            node.material.side = THREE.DoubleSide;
+            node.castShadow = true;
+            node.receiveShadow = true;
+          }
+        });
+        raycastGroup.add(gltf.scene);
+      });
+
+      scene.add(raycastGroup);
+
+      // Model 2
+      const loader2 = new GLTFLoader().setPath("models/");
+      loader2.load("b_horse.glb", function (gltf) {
+        gltf.scene.scale.set(0.0002, 0.0002, 0.0002);
+        let mymodel = gltf.scene;
+        mymodel.rotation.y = THREE.Math.degToRad(180);
+        mymodel.position.set(0, -0.01, 0);
+        controller1.add(mymodel);
+      });
+
+      // Floor
+      const squarefloortexture = new THREE.TextureLoader().load(
+        "textures/ground.jpg"
+      );
+      squarefloortexture.wrapS = THREE.RepeatWrapping;
+      squarefloortexture.wrapT = THREE.RepeatWrapping;
+      squarefloortexture.repeat.set(4, 4);
+      const geometryFloor = new THREE.PlaneGeometry(12, 12);
+      const materialPlane = new THREE.MeshLambertMaterial({
+        color: 0xffffff,
+        map: squarefloortexture,
+        side: THREE.DoubleSide,
+      });
+      const floor = new THREE.Mesh(geometryFloor, materialPlane);
+      floor.position.set(0, 0, 0);
+      floor.rotation.x = Math.PI / 2;
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      // Set Camera Position
+      camera.position.set(1, 3, 6);
+      camera.lookAt(new THREE.Vector3(0, 0, 0));
+
+      // VR
+      document.body.appendChild(VRButton.createButton(renderer));
+      renderer.xr.enabled = true;
+
+      // Controllers
+      controller1 = renderer.xr.getController(0);
+      controller1.addEventListener("selectstart", onSelectStart);
+      controller1.addEventListener("selectend", onSelectEnd);
+      scene.add(controller1);
+
+      controller2 = renderer.xr.getController(1);
+      controller2.addEventListener("selectstart", onSelectStart);
+      controller2.addEventListener("selectend", onSelectEnd);
+      scene.add(controller2);
+
+      // Controller models
+      const controllerModelFactory = new XRControllerModelFactory();
+
+      //// Controller model 1 (Commented it out, to avoid overlapping the original controller with a horse model)
+      // controllerGrip1 = renderer.xr.getControllerGrip(0);
+      // controllerGrip1.add(
+      //   controllerModelFactory.createControllerModel(controllerGrip1)
+      // );
+      //scene.add(controllerGrip1);
+
+      //// Controller model 2
+      controllerGrip2 = renderer.xr.getControllerGrip(1);
+      controllerGrip2.add(
+        controllerModelFactory.createControllerModel(controllerGrip2)
+      );
+      scene.add(controllerGrip2);
+
+      //
+
+      function onSelectStart(event) {
+        const controller = event.target;
+
+        const intersections = getIntersections(controller);
+
+        if (intersections.length > 0) {
+          const intersection = intersections[0];
+
+          const object = intersection.object;
+          object.material.emissive.b = 1;
+          controller.attach(object);
+
+          controller.userData.selected = object;
+        }
+      }
+
+      function onSelectEnd(event) {
+        const controller = event.target;
+
+        if (controller.userData.selected !== undefined) {
+          const object = controller.userData.selected;
+          object.material.emissive.b = 0;
+          raycastGroup.attach(object);
+
+          controller.userData.selected = undefined;
+        }
+      }
+
+      function getIntersections(controller) {
+        tempMatrix.identity().extractRotation(controller.matrixWorld);
+
+        raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+        return raycaster.intersectObjects(raycastGroup.children, true);
+      }
+
+      function intersectObjects(controller) {
+        // Do not highlight when already selected
+
+        if (controller.userData.selected !== undefined) return;
+
+        const line = controller.getObjectByName("line");
+        const intersections = getIntersections(controller);
+
+        if (intersections.length > 0) {
+          const intersection = intersections[0];
+
+          const object = intersection.object;
+          object.material.emissive.r = 1;
+          intersected.push(object);
+
+          line.scale.z = intersection.distance;
+        } else {
+          line.scale.z = 5;
+        }
+      }
+
+      function cleanIntersected() {
+        while (intersected.length) {
+          const object = intersected.pop();
+          object.material.emissive.r = 0;
+        }
+      }
+
+      function animate() {
+        renderer.setAnimationLoop(render);
+      }
+
+      function render() {
+        cleanIntersected();
+
+        intersectObjects(controller1);
+        intersectObjects(controller2);
+        cube.rotation.y += 0.001;
+        cube_2.rotation.y += 0.01;
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      // Resize window
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      window.addEventListener("resize", onWindowResize, false);
+
+      // Linegeometry
+      const linegeometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, -1),
+      ]);
+
+      const line = new THREE.Line(linegeometry);
+      line.name = "line";
+      line.scale.z = 5;
+
+      controller1.add(line.clone());
+      controller2.add(line.clone());
+
+      raycaster = new THREE.Raycaster();
+    </script>
+  </body>
+</html>
